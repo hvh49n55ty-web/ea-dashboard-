@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>MultiStrategyEA Dashboard</title>
+<style>
+  :root { color-scheme: dark; }
+  body { background:#121212; color:#eee; font-family:-apple-system,Segoe UI,Arial,sans-serif; margin:0; padding:24px; }
+  h1 { font-size:20px; margin:0 0 16px; }
+  .setup { background:#1c1c1c; border:1px solid #333; border-radius:8px; padding:14px; margin-bottom:20px; }
+  .setup input { width:360px; max-width:70vw; padding:6px 8px; background:#0d0d0d; border:1px solid #444; color:#eee; border-radius:4px; }
+  .setup button { padding:6px 14px; margin-left:8px; border-radius:4px; border:none; background:#2d6cdf; color:#fff; cursor:pointer; }
+  .cards { display:flex; flex-wrap:wrap; gap:12px; margin-bottom:24px; }
+  .card { background:#1c1c1c; border:1px solid #333; border-radius:8px; padding:14px 18px; min-width:150px; }
+  .card .label { font-size:12px; color:#999; text-transform:uppercase; letter-spacing:0.5px; }
+  .card .value { font-size:22px; font-weight:600; margin-top:4px; }
+  .pos { color:#4caf50; } .neg { color:#ef5350; } .warn { color:#ffa726; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:6px 10px; border-bottom:1px solid #2a2a2a; }
+  th { color:#999; font-weight:500; }
+  .muted { color:#777; font-size:12px; margin-top:6px; }
+</style>
+</head>
+<body>
+  <h1>MultiStrategyEA Dashboard</h1>
+
+  <div class="setup" id="setupBox">
+    <label>Apps Script Web App URL: </label>
+    <input id="urlInput" placeholder="https://script.google.com/macros/s/XXXX/exec">
+    <button onclick="saveUrl()">Save</button>
+    <div class="muted">Saved locally in this browser only. Paste the URL from your Apps Script deployment.</div>
+  </div>
+
+  <div class="cards" id="cards"></div>
+
+  <h2 style="font-size:16px;">Recent trades</h2>
+  <table id="tradeTable">
+    <thead><tr>
+      <th>Closed</th><th>Symbol</th><th>Strategy</th><th>Dir</th><th>Conf</th>
+      <th>RR</th><th>Net</th><th>Reason</th>
+    </tr></thead>
+    <tbody id="tradeBody"></tbody>
+  </table>
+
+  <div class="muted" id="statusLine">Not connected yet.</div>
+
+<script>
+const REFRESH_MS = 15000;
+
+function saveUrl() {
+  const url = document.getElementById('urlInput').value.trim();
+  if (url) { localStorage.setItem('msea_dashboard_url', url); refresh(); }
+}
+
+function getUrl() { return localStorage.getItem('msea_dashboard_url') || ''; }
+
+function fmtMoney(v) {
+  const n = Number(v);
+  if (isNaN(n)) return '--';
+  return (n >= 0 ? '+' : '') + n.toFixed(2);
+}
+
+function renderCards(status) {
+  const dayPL = Number(status.DayPL || 0);
+  const halted = String(status.Halted) === 'true';
+  const paused = String(status.Paused) === 'true';
+  let statusText = 'Running', statusClass = 'pos';
+  if (halted) { statusText = 'HALTED: ' + (status.HaltReason || ''); statusClass = 'neg'; }
+  else if (paused) { statusText = 'Paused'; statusClass = 'warn'; }
+
+  document.getElementById('cards').innerHTML = `
+    <div class="card"><div class="label">Status</div><div class="value ${statusClass}">${statusText}</div></div>
+    <div class="card"><div class="label">Balance</div><div class="value">${Number(status.Balance||0).toFixed(2)}</div></div>
+    <div class="card"><div class="label">Equity</div><div class="value">${Number(status.Equity||0).toFixed(2)}</div></div>
+    <div class="card"><div class="label">Today's P/L</div><div class="value ${dayPL>=0?'pos':'neg'}">${fmtMoney(status.DayPL)} (${fmtMoney(status.DayPLPercent)}%)</div></div>
+    <div class="card"><div class="label">Open Trades</div><div class="value">${status.OpenTrades ?? '--'}</div></div>
+    <div class="card"><div class="label">Last Signal</div><div class="value" style="font-size:14px;">${status.LastSignal || '--'}</div></div>
+  `;
+}
+
+function renderTrades(trades) {
+  const body = document.getElementById('tradeBody');
+  body.innerHTML = (trades || []).map(t => {
+    const net = Number(t.NetResult || 0);
+    return `<tr>
+      <td>${t.ClosedAt ? new Date(t.ClosedAt).toLocaleString() : ''}</td>
+      <td>${t.Symbol||''}</td><td>${t.Strategy||''}</td><td>${t.Direction||''}</td>
+      <td>${t.Confidence||''}</td><td>${t.PlannedRR||''}</td>
+      <td class="${net>=0?'pos':'neg'}">${fmtMoney(net)}</td>
+      <td>${t.Reason||''}</td>
+    </tr>`;
+  }).join('');
+}
+
+async function refresh() {
+  const url = getUrl();
+  const statusLine = document.getElementById('statusLine');
+  if (!url) { statusLine.textContent = 'Paste your Apps Script URL above to connect.'; return; }
+
+  document.getElementById('urlInput').value = url;
+  try {
+    const res = await fetch(url, { method: 'GET' });
+    const data = await res.json();
+    renderCards(data.status || {});
+    renderTrades(data.trades || []);
+    statusLine.textContent = 'Last updated ' + new Date().toLocaleTimeString();
+  } catch (err) {
+    statusLine.textContent = 'Could not reach backend: ' + err.message;
+  }
+}
+
+refresh();
+setInterval(refresh, REFRESH_MS);
+</script>
+</body>
+</html>
